@@ -2,6 +2,8 @@ from flask import Flask, request, jsonify
 import gspread
 import pandas as pd
 from google.auth import default
+import traceback
+
 
 app = Flask(__name__)
 
@@ -149,22 +151,30 @@ def run_multi():
     try:
         data = request.get_json(force=True)
 
-        df = read_base(data["spreadsheet_id"], data.get("sheet_base", "BaseV"))
+        spreadsheet_base_id = data["spreadsheet_base_id"]
+        spreadsheet_reporte_id = data["spreadsheet_reporte_id"]
+
+        sheet_base = data.get("sheet_base", "BaseV")
+        sheet_reporte = data.get("sheet_reporte", "REPORTE VENTAS")
+
+        df = read_base(spreadsheet_base_id, sheet_base)
 
         resultados = {}
         for tipo in data["reportes"]:
             resultados[tipo] = ejecutar_reporte(
-                tipo,
-                df,
-                data["spreadsheet_id"],
-                data.get("sheet_reporte", "REPORTE VENTAS"),
-                f'{data.get("sheet_reporte", "REPORTE VENTAS")}_{tipo}'
+                tipo=tipo,
+                df=df,
+                spreadsheet_id=spreadsheet_reporte_id,
+                sheet_fechas=sheet_reporte,
+                sheet_salida=f"{sheet_reporte}_{tipo}"
             )
 
         return jsonify(status="ok", resultados=resultados)
 
     except Exception as e:
+        print(traceback.format_exc())
         return jsonify(status="error", error=str(e)), 500
+
 
 
 if __name__ == "__main__":
