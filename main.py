@@ -117,11 +117,6 @@ def write_to_sheet(df, spreadsheet_id, sheet_name):
     )
 
 
-def read_fechas(spreadsheet_id, sheet_name):
-    ws = gc.open_by_key(spreadsheet_id).worksheet(sheet_name)
-    return int(ws.acell("B3").value), int(ws.acell("B5").value)
-
-
 def filtrar_por_fecha(df, ini, fin):
     return df[(df["num_a"] >= ini) & (df["num_a"] <= fin)]
 
@@ -136,11 +131,10 @@ def run_reporte(tipo, df):
     raise ValueError("Tipo no válido")
 
 
-def ejecutar_reporte(tipo, df, spreadsheet_id, sheet_fechas, sheet_salida):
-    ini, fin = read_fechas(spreadsheet_id, sheet_fechas)
-    out = run_reporte(tipo, filtrar_por_fecha(df, ini, fin))
-    write_to_sheet(out, spreadsheet_id, sheet_salida)
-    return len(out)
+def ejecutar_reporte(tipo, df, ini, fin):
+    df_fechas = filtrar_por_fecha(df, ini, fin)
+    out = run_reporte(tipo, df_fechas)
+    return out
 
 
 # ------------------------
@@ -151,31 +145,31 @@ def run_multi():
     try:
         data = request.get_json(force=True)
 
-        spreadsheet_base_id = data["spreadsheet_base_id"]
-        spreadsheet_reporte_id = data["spreadsheet_reporte_id"]
+        df = read_base(
+            data["spreadsheet_base_id"],
+            data.get("sheet_base", "BaseV")
+        )
 
-        sheet_base = data.get("sheet_base", "BaseV")
-        sheet_reporte = data.get("sheet_reporte", "REPORTE VENTAS")
-
-        df = read_base(spreadsheet_base_id, sheet_base)
+        ini = int(data["fecha_ini"])
+        fin = int(data["fecha_fin"])
 
         resultados = {}
-        for tipo in data["reportes"]:
-            resultados[tipo] = ejecutar_reporte(
-                tipo=tipo,
-                df=df,
-                spreadsheet_id=spreadsheet_reporte_id,
-                sheet_fechas=sheet_reporte,
-                sheet_salida=f"{sheet_reporte}_{tipo}"
-            )
+        tipo = data["tipo"]
+        out = ejecutar_reporte(tipo, df, ini, fin)
+        write_to_sheet(
+            out,
+            data["spreadsheet_reporte_id"],
+            f'{data.get("sheet_reporte", "REPORTE VENTAS")}_{tipo}'
+        )
+        resultados = {tipo: len(out)}
+       
 
         return jsonify(status="ok", resultados=resultados)
 
     except Exception as e:
         print(traceback.format_exc())
         return jsonify(status="error", error=str(e)), 500
-
-
+    
 
 if __name__ == "__main__":
     pass
