@@ -227,6 +227,7 @@ def reporte_sucursales(df):
 def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
     """
     Escribe en la misma hoja desde start_row (fila 26 como en legacy)
+    Con formato correcto: fechas YYYY-MM-DD, departamento capitalizado, números sin apóstrofe
     """
     try:
         sh = gc.open_by_key(spreadsheet_id)
@@ -240,7 +241,7 @@ def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
             range_to_clear = f"A{start_row}:{gspread.utils.rowcol_to_a1(max_rows, max_cols)}"
             ws.batch_clear([range_to_clear])
         
-        # Preparar headers con nombres legibles
+        # Headers
         header_map = {
             "fecha_captura": "Fecha Captura",
             "fecha": "Fecha",
@@ -265,28 +266,60 @@ def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
         headers = [[header_map.get(col, col.replace("_", " ").title()) for col in df.columns]]
         ws.update(f"A{start_row}", headers)
         
-        # Formatear datos antes de escribir
+        # Formatear datos
         if len(df) > 0:
             df_formatted = df.copy()
             
-            # 1. Capitalizar departamento
+            # Capitalizar departamento
             if "departamento" in df_formatted.columns:
                 df_formatted["departamento"] = df_formatted["departamento"].str.capitalize()
             
-            # 2. Formatear fechas (de texto a YYYY-MM-DD)
+            # Capitalizar tipo_de_pago (Primera letra de cada palabra)
+            if "tipo_de_pago" in df_formatted.columns:
+                df_formatted["tipo_de_pago"] = df_formatted["tipo_de_pago"].str.title()
+            
+            # Formatear fechas
+            def parse_date_safe(val):
+                if pd.isna(val) or str(val).strip() == "":
+                    return ""
+                try:
+                    dt = pd.to_datetime(val, errors='coerce')
+                    if pd.notna(dt):
+                        return dt.strftime('%Y-%m-%d')
+                except:
+                    pass
+                return str(val)
+            
             for col in ["fecha_captura", "fecha"]:
                 if col in df_formatted.columns:
-                    df_formatted[col] = pd.to_datetime(
-                        df_formatted[col], 
-                        errors='coerce'
-                    ).dt.strftime('%Y-%m-%d')
+                    df_formatted[col] = df_formatted[col].apply(parse_date_safe)
             
-            # 3. Agregar apóstrofe al folio para que Sheets lo trate como texto
-            if "folio" in df_formatted.columns:
-                df_formatted["folio"] = "'" + df_formatted["folio"].astype(str)
+            # Convertir columnas numéricas a números (sin apóstrofe)
+            numeric_cols = ["folio", "num_sucursal", "cantidad", "precio_final", "monto_cupon"]
+            for col in numeric_cols:
+                if col in df_formatted.columns:
+                    df_formatted[col] = pd.to_numeric(df_formatted[col], errors='coerce')
             
-            # Convertir a lista, reemplazando NaT con vacío
-            data = df_formatted.fillna("").astype(str).replace('NaT', '').values.tolist()
+            # Preparar datos para escribir
+            data = []
+            for _, row in df_formatted.iterrows():
+                row_data = []
+                for col in df_formatted.columns:
+                    val = row[col]
+                    
+                    # Si es NaN o None, vacío
+                    if pd.isna(val):
+                        row_data.append("")
+                    # Si es numérico, mantener como número
+                    elif col in numeric_cols:
+                        row_data.append(val if not pd.isna(val) else "")
+                    # Todo lo demás como string
+                    else:
+                        row_data.append(str(val))
+                
+                data.append(row_data)
+            
+            # Escribir
             ws.update(f"A{start_row + 1}", data)
         
         print(f"Escritura exitosa: {len(df)} filas en '{sheet_name}'", file=sys.stderr)
@@ -294,7 +327,6 @@ def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
     except Exception as e:
         print(f"Error en write_to_sheet: {str(e)}", file=sys.stderr)
         raise
-
 
 def filtrar_por_fecha(df, ini, fin):
     filtered = df[(df["num_a"] >= ini) & (df["num_a"] <= fin)]
