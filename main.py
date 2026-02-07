@@ -315,10 +315,61 @@ def run_multi():
         return jsonify(status="error", error=str(e), trace=traceback.format_exc()), 500
 
 
+@app.route("/debug", methods=["POST"])
+def debug():
+    try:
+        data = request.get_json(force=True)
+        
+        df = read_base(
+            data["spreadsheet_base_id"],
+            data.get("sheet_base", "BaseV")
+        )
+        
+        ini = int(data["fecha_ini"])
+        fin = int(data["fecha_fin"])
+        
+        # Filtrar por fecha
+        df_fechas = df[(df["num_a"] >= ini) & (df["num_a"] <= fin)]
+        
+        info = {
+            "total_rows": len(df),
+            "rows_after_date_filter": len(df_fechas),
+            "date_range": f"{ini} - {fin}",
+            "departamentos_unicos": df["departamento"].value_counts().to_dict() if "departamento" in df.columns else {},
+            "tipo_pago_unicos": df["tipo_de_pago"].value_counts().to_dict() if "tipo_de_pago" in df.columns else {},
+            "num_a_min": int(df["num_a"].min()) if len(df) > 0 else None,
+            "num_a_max": int(df["num_a"].max()) if len(df) > 0 else None,
+            "sample_departamentos": df["departamento"].head(10).tolist() if "departamento" in df.columns else [],
+            "sample_tipo_pago": df["tipo_de_pago"].head(10).tolist() if "tipo_de_pago" in df.columns else [],
+            "columns": df.columns.tolist()
+        }
+        
+        # Para SUCURSALES específicamente
+        if data.get("tipo") == "SUCURSALES":
+            sucursal_df = df[df["departamento"] == "sucursal"]
+            info["sucursal_rows"] = len(sucursal_df)
+            info["sucursal_tipo_pago"] = sucursal_df["tipo_de_pago"].value_counts().to_dict() if len(sucursal_df) > 0 else {}
+            
+            # Ver si tiene cantidades
+            for i in range(1, 7):
+                col_cant = f"cant__{i}" if i <= 3 else f"cant_{i}"
+                if col_cant in df.columns:
+                    non_zero = df[col_cant].apply(lambda x: pd.to_numeric(x, errors='coerce')).dropna()
+                    non_zero = non_zero[non_zero > 0]
+                    info[f"{col_cant}_non_zero_count"] = len(non_zero)
+        
+        return jsonify(status="ok", debug=info)
+        
+    except Exception as e:
+        print(traceback.format_exc(), file=sys.stderr)
+        return jsonify(status="error", error=str(e), trace=traceback.format_exc()), 500
+
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify(status="ok")
-    
+
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
