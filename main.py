@@ -23,7 +23,7 @@ def read_base(spreadsheet_id, sheet_name):
         
         df = pd.DataFrame(data)
         
-        # Normalización de columnas más robusta
+        # Normalización de columnas
         column_map = {}
         for col in df.columns:
             normalized = (
@@ -39,13 +39,15 @@ def read_base(spreadsheet_id, sheet_name):
                 .replace("í", "i")
                 .replace("ó", "o")
                 .replace("ú", "u")
+                .replace("(", "")
+                .replace(")", "")
+                .replace("/", "_")
             )
             column_map[col] = normalized
         
         df.rename(columns=column_map, inplace=True)
         
-        # Logging para debug
-        print(f"Columnas encontradas: {df.columns.tolist()}", file=sys.stderr)
+        print(f"Columnas encontradas: {df.columns.tolist()[:20]}...", file=sys.stderr)
         
         df["num_a"] = pd.to_numeric(df["num_a"], errors="coerce")
         
@@ -53,14 +55,20 @@ def read_base(spreadsheet_id, sheet_name):
             df["departamento"] = df["departamento"].astype(str).str.strip().str.lower()
         
         if "tipo_de_pago" in df.columns:
-            df["tipo_de_pago"] = df["tipo_de_pago"].astype(str).str.strip().str.lower()
+            df["tipo_de_pago"] = (
+                df["tipo_de_pago"]
+                .astype(str)
+                .str.strip()
+                .str.lower()
+                .str.replace(r'\s+', ' ', regex=True)
+            )
 
         return df
     
     except gspread.exceptions.WorksheetNotFound:
-        raise ValueError(f"Hoja '{sheet_name}' no encontrada en spreadsheet {spreadsheet_id}")
+        raise ValueError(f"Hoja '{sheet_name}' no encontrada")
     except gspread.exceptions.SpreadsheetNotFound:
-        raise ValueError(f"Spreadsheet {spreadsheet_id} no encontrado o sin permisos")
+        raise ValueError(f"Spreadsheet {spreadsheet_id} no encontrado")
     except Exception as e:
         print(f"Error en read_base: {str(e)}", file=sys.stderr)
         print(traceback.format_exc(), file=sys.stderr)
@@ -80,39 +88,37 @@ def safe_get(row, *keys):
 
 def normalize_items(df, items=9, include_extras=False):
     """
-    include_extras: si True, incluye columnas adicionales para SUCURSALES
+    Normaliza items de ventas con soporte para nombres de columnas inconsistentes
     """
     out = []
+    
+    print(f"Normalizando {len(df)} filas con {items} items", file=sys.stderr)
 
     for _, r in df.iterrows():
         for i in range(1, items + 1):
-            # Manejo robusto de nombres inconsistentes
+            # Nombres reales según el debug:
+            # cant_1, cant_2, cant_3, cant4, cant5, cant6, cant7, cant8, cant9
             if i <= 3:
-                cant = safe_get(r, f"cant__{i}", f"cant_{i}")
+                cant = safe_get(r, f"cant_{i}", f"cant{i}")
             else:
-                cant = safe_get(r, f"cant_{i}", f"cant__{i}")
+                cant = safe_get(r, f"cant{i}", f"cant_{i}")
             
             cant = pd.to_numeric(cant, errors="coerce")
 
             if pd.isna(cant) or cant <= 0:
                 continue
 
-            # Categoría
-            if i <= 4:
+            # Categoría: descr1_1, descr2_1, descr3_1, descr4_1, descr5, descr6...
+            if i <= 4 or i == 9:
                 categoria = safe_get(r, f"descr{i}_1")
-            elif i == 9:
-                categoria = safe_get(r, f"descr9_1", f"descr{i}")
             else:  # 5,6,7,8
-                categoria = safe_get(r, f"descr{i}", f"descr{i}_1")
+                categoria = safe_get(r, f"descr{i}")
 
-            # Descripción
+            # Descripción: siempre descr{i}_2
             descripcion = safe_get(r, f"descr{i}_2")
 
-            # Precio
-            if i == 7:
-                precio_final = safe_get(r, f"precio_final_6", f"precio_final_{i}")
-            else:
-                precio_final = safe_get(r, f"precio_final_{i}")
+            # Precio final: siempre precio_final_{i}
+            precio_final = safe_get(r, f"precio_final_{i}")
 
             row = {
                 "fecha_captura": safe_get(r, "fecha_captura"),
@@ -120,8 +126,8 @@ def normalize_items(df, items=9, include_extras=False):
                 "folio": safe_get(r, "folio"),
                 "departamento": safe_get(r, "departamento"),
                 "cliente": safe_get(r, "cliente"),
-                "metodo_de_venta": safe_get(r, "metodo_de_venta", "metodo_de_venta"),
-                "num_sucursal": safe_get(r, "num_sucursal", "num__sucursal", "_sucursal"),
+                "metodo_de_venta": safe_get(r, "metodo_de_venta"),
+                "num_sucursal": safe_get(r, "num_sucursal"),
                 "sucursal": safe_get(r, "sucursal"),
                 "vendedor": safe_get(r, "vendedor"),
                 "cantidad": cant,
@@ -164,6 +170,7 @@ def normalize_items(df, items=9, include_extras=False):
 
             out.append(row)
 
+    print(f"Rows normalizados: {len(out)}", file=sys.stderr)
     return pd.DataFrame(out)
 
 
@@ -182,17 +189,24 @@ def reporte_general(df):
             ]))
         )
     ]
+    print(f"GENERAL filtrado: {len(filtered)} filas", file=sys.stderr)
     return normalize_items(filtered)
 
+
 def reporte_constructora(df):
-    return normalize_items(df[df["departamento"] == "constructora"])
+    filtered = df[df["departamento"] == "constructora"]
+    print(f"CONSTRUCTORA filtrado: {len(filtered)} filas", file=sys.stderr)
+    return normalize_items(filtered)
+
 
 def reporte_distribuidores(df):
     filtered = df[
         (df["departamento"] == "distribuidores") &
         (df["tipo_de_pago"] == "pago")
     ]
+    print(f"DISTRIBUIDORES filtrado: {len(filtered)} filas", file=sys.stderr)
     return normalize_items(filtered)
+
 
 def reporte_sucursales(df):
     filtered = df[
@@ -203,6 +217,7 @@ def reporte_sucursales(df):
             "complemento"
         ]))
     ]
+    print(f"SUCURSALES filtrado: {len(filtered)} filas", file=sys.stderr)
     return normalize_items(filtered, items=6, include_extras=True)
 
 
@@ -225,8 +240,29 @@ def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
             range_to_clear = f"A{start_row}:{gspread.utils.rowcol_to_a1(max_rows, max_cols)}"
             ws.batch_clear([range_to_clear])
         
-        # Escribir headers en fila 26
-        headers = [[str(col).replace("_", " ").title() for col in df.columns]]
+        # Preparar headers con nombres legibles
+        header_map = {
+            "fecha_captura": "Fecha Captura",
+            "fecha": "Fecha",
+            "folio": "Folio",
+            "departamento": "Departamento",
+            "cliente": "Cliente",
+            "metodo_de_venta": "Metodo de Venta",
+            "num_sucursal": "Num Sucursal",
+            "sucursal": "Sucursal",
+            "vendedor": "Vendedor",
+            "cantidad": "Cantidad",
+            "categoria": "Categoria",
+            "descripcion": "Descripcion",
+            "precio_final": "Precio Final",
+            "tipo_de_pago": "Tipo de Pago",
+            "salida": "Salida",
+            "comentario_cupon": "Comentario Cupon",
+            "monto_cupon": "Monto Cupon",
+            "comentario": "Comentario"
+        }
+        
+        headers = [[header_map.get(col, col.replace("_", " ").title()) for col in df.columns]]
         ws.update(f"A{start_row}", headers)
         
         # Escribir datos desde fila 27
@@ -236,15 +272,16 @@ def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
         
         print(f"Escritura exitosa: {len(df)} filas en '{sheet_name}'", file=sys.stderr)
     
-    except gspread.exceptions.WorksheetNotFound:
-        raise ValueError(f"Hoja '{sheet_name}' no encontrada para escritura")
     except Exception as e:
         print(f"Error en write_to_sheet: {str(e)}", file=sys.stderr)
         raise
 
 
 def filtrar_por_fecha(df, ini, fin):
-    return df[(df["num_a"] >= ini) & (df["num_a"] <= fin)]
+    filtered = df[(df["num_a"] >= ini) & (df["num_a"] <= fin)]
+    print(f"Filtro de fecha {ini}-{fin}: {len(filtered)} filas (de {len(df)} totales)", file=sys.stderr)
+    print(f"Rango real en datos: {df['num_a'].min():.0f} - {df['num_a'].max():.0f}", file=sys.stderr)
+    return filtered
 
 
 def run_reporte(tipo, df):
@@ -274,9 +311,9 @@ def run_multi():
     try:
         data = request.get_json(force=True)
         
-        print(f"Request recibido: {data}", file=sys.stderr)
+        print(f"Request: {data}", file=sys.stderr)
 
-        # Validación de parámetros
+        # Validación
         required = ["spreadsheet_base_id", "spreadsheet_reporte_id", "fecha_ini", "fecha_fin", "tipo"]
         for field in required:
             if field not in data:
@@ -295,8 +332,6 @@ def run_multi():
 
         out = ejecutar_reporte(tipo, df, ini, fin)
         
-        print(f"Reporte generado: {len(out)} filas", file=sys.stderr)
-        
         write_to_sheet_legacy_style(
             out,
             data["spreadsheet_reporte_id"],
@@ -310,9 +345,9 @@ def run_multi():
         print(f"ValueError: {str(ve)}", file=sys.stderr)
         return jsonify(status="error", error=str(ve)), 400
     except Exception as e:
-        print(f"Error general: {str(e)}", file=sys.stderr)
+        print(f"Error: {str(e)}", file=sys.stderr)
         print(traceback.format_exc(), file=sys.stderr)
-        return jsonify(status="error", error=str(e), trace=traceback.format_exc()), 500
+        return jsonify(status="error", error=str(e)), 500
 
 
 @app.route("/debug", methods=["POST"])
@@ -328,7 +363,6 @@ def debug():
         ini = int(data["fecha_ini"])
         fin = int(data["fecha_fin"])
         
-        # Filtrar por fecha
         df_fechas = df[(df["num_a"] >= ini) & (df["num_a"] <= fin)]
         
         info = {
@@ -344,15 +378,17 @@ def debug():
             "columns": df.columns.tolist()
         }
         
-        # Para SUCURSALES específicamente
         if data.get("tipo") == "SUCURSALES":
             sucursal_df = df[df["departamento"] == "sucursal"]
             info["sucursal_rows"] = len(sucursal_df)
             info["sucursal_tipo_pago"] = sucursal_df["tipo_de_pago"].value_counts().to_dict() if len(sucursal_df) > 0 else {}
             
-            # Ver si tiene cantidades
             for i in range(1, 7):
-                col_cant = f"cant__{i}" if i <= 3 else f"cant_{i}"
+                if i <= 3:
+                    col_cant = f"cant_{i}"
+                else:
+                    col_cant = f"cant{i}"
+                    
                 if col_cant in df.columns:
                     non_zero = df[col_cant].apply(lambda x: pd.to_numeric(x, errors='coerce')).dropna()
                     non_zero = non_zero[non_zero > 0]
@@ -362,14 +398,13 @@ def debug():
         
     except Exception as e:
         print(traceback.format_exc(), file=sys.stderr)
-        return jsonify(status="error", error=str(e), trace=traceback.format_exc()), 500
+        return jsonify(status="error", error=str(e)), 500
 
 
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify(status="ok")
-
-
+    
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
