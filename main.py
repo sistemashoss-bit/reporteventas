@@ -265,9 +265,28 @@ def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
         headers = [[header_map.get(col, col.replace("_", " ").title()) for col in df.columns]]
         ws.update(f"A{start_row}", headers)
         
-        # Escribir datos desde fila 27
+        # Formatear datos antes de escribir
         if len(df) > 0:
-            data = df.fillna("").astype(str).values.tolist()
+            df_formatted = df.copy()
+            
+            # 1. Capitalizar departamento
+            if "departamento" in df_formatted.columns:
+                df_formatted["departamento"] = df_formatted["departamento"].str.capitalize()
+            
+            # 2. Formatear fechas (de texto a YYYY-MM-DD)
+            for col in ["fecha_captura", "fecha"]:
+                if col in df_formatted.columns:
+                    df_formatted[col] = pd.to_datetime(
+                        df_formatted[col], 
+                        errors='coerce'
+                    ).dt.strftime('%Y-%m-%d')
+            
+            # 3. Agregar apóstrofe al folio para que Sheets lo trate como texto
+            if "folio" in df_formatted.columns:
+                df_formatted["folio"] = "'" + df_formatted["folio"].astype(str)
+            
+            # Convertir a lista, reemplazando NaT con vacío
+            data = df_formatted.fillna("").astype(str).replace('NaT', '').values.tolist()
             ws.update(f"A{start_row + 1}", data)
         
         print(f"Escritura exitosa: {len(df)} filas en '{sheet_name}'", file=sys.stderr)
