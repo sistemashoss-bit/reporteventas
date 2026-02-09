@@ -96,8 +96,6 @@ def normalize_items(df, items=9, include_extras=False):
 
     for _, r in df.iterrows():
         for i in range(1, items + 1):
-            # Nombres reales según el debug:
-            # cant_1, cant_2, cant_3, cant4, cant5, cant6, cant7, cant8, cant9
             if i <= 3:
                 cant = safe_get(r, f"cant_{i}", f"cant{i}")
             else:
@@ -108,16 +106,12 @@ def normalize_items(df, items=9, include_extras=False):
             if pd.isna(cant) or cant <= 0:
                 continue
 
-            # Categoría: descr1_1, descr2_1, descr3_1, descr4_1, descr5, descr6...
             if i <= 4 or i == 9:
                 categoria = safe_get(r, f"descr{i}_1")
-            else:  # 5,6,7,8
+            else:
                 categoria = safe_get(r, f"descr{i}")
 
-            # Descripción: siempre descr{i}_2
             descripcion = safe_get(r, f"descr{i}_2")
-
-            # Precio final: siempre precio_final_{i}
             precio_final = safe_get(r, f"precio_final_{i}")
 
             row = {
@@ -138,7 +132,6 @@ def normalize_items(df, items=9, include_extras=False):
                 "salida": safe_get(r, "salida")
             }
 
-            # Campos extras para SUCURSALES
             if include_extras:
                 adicional_1 = str(safe_get(r, "adicional_1") or "").lower()
                 adicional_2 = str(safe_get(r, "adicional_2") or "").lower()
@@ -175,7 +168,7 @@ def normalize_items(df, items=9, include_extras=False):
 
 
 # ------------------------
-# REPORTES
+# REPORTES VENTAS
 # ------------------------
 def reporte_general(df):
     filtered = df[
@@ -222,18 +215,158 @@ def reporte_sucursales(df):
 
 
 # ------------------------
-# SHEETS IO
+# REPORTES MAXIMOS (AGREGADOS)
+# ------------------------
+def reporte_maximos_general(df):
+    """Reporte MAXIMOS para GENERAL"""
+    filtered = df[
+        (df["departamento"].isin(["constructora", "distribuidores"])) |
+        (
+            (df["departamento"] == "sucursal") &
+            (df["tipo_de_pago"].isin([
+                "pago total",
+                "puerta pagada (anticipo)",
+                "complemento"
+            ]))
+        )
+    ]
+    print(f"MAXIMOS GENERAL filtrado: {len(filtered)} filas", file=sys.stderr)
+    return aggregate_by_sucursal_descripcion(filtered)
+
+
+def reporte_maximos_constructora(df):
+    """Reporte MAXIMOS para CONSTRUCTORA"""
+    filtered = df[df["departamento"] == "constructora"]
+    print(f"MAXIMOS CONSTRUCTORA filtrado: {len(filtered)} filas", file=sys.stderr)
+    return aggregate_by_sucursal_descripcion(filtered)
+
+
+def reporte_maximos_distribuidores(df):
+    """Reporte MAXIMOS para DISTRIBUIDORES"""
+    filtered = df[df["departamento"] == "distribuidores"]
+    print(f"MAXIMOS DISTRIBUIDORES filtrado: {len(filtered)} filas", file=sys.stderr)
+    return aggregate_by_sucursal_descripcion(filtered)
+
+
+def reporte_maximos_sucursales(df):
+    """Reporte MAXIMOS para SUCURSALES"""
+    filtered = df[
+        (df["departamento"] == "sucursal") &
+        (df["tipo_de_pago"].isin([
+            "pago total",
+            "puerta pagada (anticipo)",
+            "complemento"
+        ]))
+    ]
+    print(f"MAXIMOS SUCURSALES filtrado: {len(filtered)} filas", file=sys.stderr)
+    return aggregate_by_sucursal_descripcion(filtered)
+
+
+def aggregate_by_sucursal_descripcion(df, items=6):
+    """
+    Agrupa por Sucursal + Descripción y suma cantidades
+    Filtra solo categorías específicas de productos
+    """
+    rows = []
+    
+    # Categorías válidas (normalizadas a lowercase con guion bajo)
+    categorias_validas = [
+        "estándar_3", "estandar_3",
+        "estándar_1", "estandar_1",
+        "estándar_2", "estandar_2",
+        "con_fijo_1",
+        "estándar_4", "estandar_4",
+        "con_fijo_2",
+        "doble"
+    ]
+    
+    # Descripciones especiales
+    descripciones_especiales = [
+        "chapa inteligente 7cm (no incluye baterías)",
+        "chapa inteligente 5cm (no incluye baterías)",
+        "chapa"
+    ]
+    
+    for _, r in df.iterrows():
+        for i in range(1, items + 1):
+            # Cantidad
+            if i <= 3:
+                cant = safe_get(r, f"cant_{i}", f"cant{i}")
+            else:
+                cant = safe_get(r, f"cant{i}", f"cant_{i}")
+            
+            cant = pd.to_numeric(cant, errors="coerce")
+            if pd.isna(cant) or cant <= 0:
+                continue
+            
+            # Categoría
+            if i <= 4 or i == 9:
+                categoria = safe_get(r, f"descr{i}_1")
+            else:
+                categoria = safe_get(r, f"descr{i}")
+            
+            # Descripción
+            descripcion = safe_get(r, f"descr{i}_2")
+            
+            if not descripcion or pd.isna(descripcion):
+                continue
+            
+            # Normalizar para comparación
+            categoria_lower = str(categoria).lower().strip() if categoria else ""
+            descripcion_lower = str(descripcion).lower().strip()
+            
+            # Excluir "Servicio"
+            if categoria_lower == "servicio":
+                continue
+            
+            # Validar si cumple alguna condición
+            es_valido = (
+                categoria_lower in categorias_validas or
+                descripcion_lower in descripciones_especiales
+            )
+            
+            if not es_valido:
+                continue
+            
+            rows.append({
+                "num_sucursal": safe_get(r, "num_sucursal"),
+                "sucursal": safe_get(r, "sucursal"),
+                "descripcion": descripcion,
+                "cantidad": cant
+            })
+    
+    if not rows:
+        print("No hay filas válidas después de filtrar MAXIMOS", file=sys.stderr)
+        return pd.DataFrame(columns=["num_sucursal", "sucursal", "descripcion", "cantidad_total"])
+    
+    df_items = pd.DataFrame(rows)
+    
+    # Agrupar y sumar
+    df_grouped = (
+        df_items
+        .groupby(["num_sucursal", "sucursal", "descripcion"], as_index=False)
+        .agg({"cantidad": "sum"})
+        .rename(columns={"cantidad": "cantidad_total"})
+    )
+    
+    # Ordenar por sucursal
+    df_grouped = df_grouped.sort_values("sucursal")
+    
+    print(f"Rows agregados MAXIMOS: {len(df_grouped)}", file=sys.stderr)
+    return df_grouped
+
+
+# ------------------------
+# SHEETS IO - VENTAS
 # ------------------------
 def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
     """
-    Escribe en la misma hoja desde start_row (fila 26 como en legacy)
-    Con formato correcto: fechas YYYY-MM-DD, departamento capitalizado, números sin apóstrofe
+    Escribe reportes de VENTAS desde fila 26
     """
     try:
         sh = gc.open_by_key(spreadsheet_id)
         ws = sh.worksheet(sheet_name)
         
-        # Limpiar desde fila 26 hacia abajo
         max_rows = ws.row_count
         max_cols = ws.col_count
         
@@ -241,7 +374,6 @@ def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
             range_to_clear = f"A{start_row}:{gspread.utils.rowcol_to_a1(max_rows, max_cols)}"
             ws.batch_clear([range_to_clear])
         
-        # Headers
         header_map = {
             "fecha_captura": "Fecha Captura",
             "fecha": "Fecha",
@@ -266,19 +398,15 @@ def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
         headers = [[header_map.get(col, col.replace("_", " ").title()) for col in df.columns]]
         ws.update(f"A{start_row}", headers)
         
-        # Formatear datos
         if len(df) > 0:
             df_formatted = df.copy()
             
-            # Capitalizar departamento
             if "departamento" in df_formatted.columns:
                 df_formatted["departamento"] = df_formatted["departamento"].str.capitalize()
             
-            # Capitalizar tipo_de_pago (Primera letra de cada palabra)
             if "tipo_de_pago" in df_formatted.columns:
                 df_formatted["tipo_de_pago"] = df_formatted["tipo_de_pago"].str.title()
             
-            # Formatear fechas
             def parse_date_safe(val):
                 if pd.isna(val) or str(val).strip() == "":
                     return ""
@@ -294,40 +422,90 @@ def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
                 if col in df_formatted.columns:
                     df_formatted[col] = df_formatted[col].apply(parse_date_safe)
             
-            # Convertir columnas numéricas a números (sin apóstrofe)
             numeric_cols = ["folio", "num_sucursal", "cantidad", "precio_final", "monto_cupon"]
             for col in numeric_cols:
                 if col in df_formatted.columns:
                     df_formatted[col] = pd.to_numeric(df_formatted[col], errors='coerce')
             
-            # Preparar datos para escribir
             data = []
             for _, row in df_formatted.iterrows():
                 row_data = []
                 for col in df_formatted.columns:
                     val = row[col]
                     
-                    # Si es NaN o None, vacío
                     if pd.isna(val):
                         row_data.append("")
-                    # Si es numérico, mantener como número
                     elif col in numeric_cols:
                         row_data.append(val if not pd.isna(val) else "")
-                    # Todo lo demás como string
                     else:
                         row_data.append(str(val))
                 
                 data.append(row_data)
             
-            # Escribir
             ws.update(f"A{start_row + 1}", data)
         
-        print(f"Escritura exitosa: {len(df)} filas en '{sheet_name}'", file=sys.stderr)
+        print(f"Escritura VENTAS exitosa: {len(df)} filas en '{sheet_name}'", file=sys.stderr)
     
     except Exception as e:
         print(f"Error en write_to_sheet: {str(e)}", file=sys.stderr)
         raise
 
+
+# ------------------------
+# SHEETS IO - MAXIMOS
+# ------------------------
+def write_to_sheet_maximos(df, spreadsheet_id, sheet_name, start_row=12):
+    """
+    Escribe reportes MAXIMOS desde fila 12
+    Formato: Numero de Sucursal, Sucursal, Descripcion, Cantidad Total
+    """
+    try:
+        sh = gc.open_by_key(spreadsheet_id)
+        ws = sh.worksheet(sheet_name)
+        
+        max_rows = ws.row_count
+        max_cols = ws.col_count
+        
+        if max_rows >= start_row:
+            range_to_clear = f"A{start_row}:{gspread.utils.rowcol_to_a1(max_rows, max_cols)}"
+            ws.batch_clear([range_to_clear])
+        
+        # Headers fijos para MAXIMOS
+        headers = [["Numero de Sucursal", "Sucursal", "Descripcion", "Cantidad Total"]]
+        ws.update(f"A{start_row}", headers)
+        
+        if len(df) > 0:
+            df_formatted = df.copy()
+            
+            # Convertir num_sucursal y cantidad_total a números
+            numeric_cols = ["num_sucursal", "cantidad_total"]
+            for col in numeric_cols:
+                if col in df_formatted.columns:
+                    df_formatted[col] = pd.to_numeric(df_formatted[col], errors='coerce')
+            
+            # Preparar datos
+            data = []
+            for _, row in df_formatted.iterrows():
+                row_data = [
+                    row["num_sucursal"] if not pd.isna(row["num_sucursal"]) else "",
+                    str(row["sucursal"]) if not pd.isna(row["sucursal"]) else "",
+                    str(row["descripcion"]) if not pd.isna(row["descripcion"]) else "",
+                    row["cantidad_total"] if not pd.isna(row["cantidad_total"]) else ""
+                ]
+                data.append(row_data)
+            
+            ws.update(f"A{start_row + 1}", data)
+        
+        print(f"Escritura MAXIMOS exitosa: {len(df)} filas en '{sheet_name}'", file=sys.stderr)
+    
+    except Exception as e:
+        print(f"Error en write_to_sheet_maximos: {str(e)}", file=sys.stderr)
+        raise
+
+
+# ------------------------
+# HELPERS
+# ------------------------
 def filtrar_por_fecha(df, ini, fin):
     filtered = df[(df["num_a"] >= ini) & (df["num_a"] <= fin)]
     print(f"Filtro de fecha {ini}-{fin}: {len(filtered)} filas (de {len(df)} totales)", file=sys.stderr)
@@ -348,23 +526,42 @@ def run_reporte(tipo, df):
     raise ValueError(f"Tipo no válido: {tipo}")
 
 
+def run_reporte_maximos(tipo, df):
+    tipo = tipo.upper()
+    if tipo == "GENERAL":
+        return reporte_maximos_general(df)
+    if tipo == "CONSTRUCTORA":
+        return reporte_maximos_constructora(df)
+    if tipo == "DISTRIBUIDORES":
+        return reporte_maximos_distribuidores(df)
+    if tipo == "SUCURSALES":
+        return reporte_maximos_sucursales(df)
+    raise ValueError(f"Tipo MAXIMOS no válido: {tipo}")
+
+
 def ejecutar_reporte(tipo, df, ini, fin):
     df_fechas = filtrar_por_fecha(df, ini, fin)
     out = run_reporte(tipo, df_fechas)
     return out
 
 
+def ejecutar_reporte_maximos(tipo, df, ini, fin):
+    df_fechas = filtrar_por_fecha(df, ini, fin)
+    out = run_reporte_maximos(tipo, df_fechas)
+    return out
+
+
 # ------------------------
-# API
+# API ENDPOINTS
 # ------------------------
 @app.route("/run-multi", methods=["POST"])
 def run_multi():
+    """Endpoint para reportes de VENTAS"""
     try:
         data = request.get_json(force=True)
         
-        print(f"Request: {data}", file=sys.stderr)
+        print(f"Request VENTAS: {data}", file=sys.stderr)
 
-        # Validación
         required = ["spreadsheet_base_id", "spreadsheet_reporte_id", "fecha_ini", "fecha_fin", "tipo"]
         for field in required:
             if field not in data:
@@ -401,6 +598,50 @@ def run_multi():
         return jsonify(status="error", error=str(e)), 500
 
 
+@app.route("/run-maximos", methods=["POST"])
+def run_maximos():
+    """Endpoint dedicado para reportes MAXIMOS"""
+    try:
+        data = request.get_json(force=True)
+        
+        print(f"Request MAXIMOS: {data}", file=sys.stderr)
+
+        required = ["spreadsheet_base_id", "spreadsheet_reporte_id", "fecha_ini", "fecha_fin", "tipo"]
+        for field in required:
+            if field not in data:
+                return jsonify(status="error", error=f"Falta parámetro: {field}"), 400
+
+        df = read_base(
+            data["spreadsheet_base_id"],
+            data.get("sheet_base", "BaseV")
+        )
+
+        print(f"DataFrame cargado: {len(df)} filas", file=sys.stderr)
+
+        ini = int(data["fecha_ini"])
+        fin = int(data["fecha_fin"])
+        tipo = data["tipo"]
+
+        out = ejecutar_reporte_maximos(tipo, df, ini, fin)
+        
+        write_to_sheet_maximos(
+            out,
+            data["spreadsheet_reporte_id"],
+            data.get("sheet_reporte", "MAXIMOS"),
+            start_row=12
+        )
+
+        return jsonify(status="ok", tipo=tipo, rows=len(out))
+
+    except ValueError as ve:
+        print(f"ValueError MAXIMOS: {str(ve)}", file=sys.stderr)
+        return jsonify(status="error", error=str(ve)), 400
+    except Exception as e:
+        print(f"Error MAXIMOS: {str(e)}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        return jsonify(status="error", error=str(e)), 500
+
+
 @app.route("/debug", methods=["POST"])
 def debug():
     try:
@@ -424,26 +665,8 @@ def debug():
             "tipo_pago_unicos": df["tipo_de_pago"].value_counts().to_dict() if "tipo_de_pago" in df.columns else {},
             "num_a_min": int(df["num_a"].min()) if len(df) > 0 else None,
             "num_a_max": int(df["num_a"].max()) if len(df) > 0 else None,
-            "sample_departamentos": df["departamento"].head(10).tolist() if "departamento" in df.columns else [],
-            "sample_tipo_pago": df["tipo_de_pago"].head(10).tolist() if "tipo_de_pago" in df.columns else [],
             "columns": df.columns.tolist()
         }
-        
-        if data.get("tipo") == "SUCURSALES":
-            sucursal_df = df[df["departamento"] == "sucursal"]
-            info["sucursal_rows"] = len(sucursal_df)
-            info["sucursal_tipo_pago"] = sucursal_df["tipo_de_pago"].value_counts().to_dict() if len(sucursal_df) > 0 else {}
-            
-            for i in range(1, 7):
-                if i <= 3:
-                    col_cant = f"cant_{i}"
-                else:
-                    col_cant = f"cant{i}"
-                    
-                if col_cant in df.columns:
-                    non_zero = df[col_cant].apply(lambda x: pd.to_numeric(x, errors='coerce')).dropna()
-                    non_zero = non_zero[non_zero > 0]
-                    info[f"{col_cant}_non_zero_count"] = len(non_zero)
         
         return jsonify(status="ok", debug=info)
         
