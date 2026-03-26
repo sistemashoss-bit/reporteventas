@@ -3,3 +3,4 @@ gunicorn
 pandas
 gspread
 google-auth
+psycopg2-binary

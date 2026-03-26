@@ -1,14 +1,135 @@
-from flask import Flask, request, jsonify
-import gspread
-import pandas as pd
-from google.auth import default
-import traceback
+import os
 import sys
+import pandas as pd
+import gspread
+import traceback
+import psycopg2
+import psycopg2.pool
+import psycopg2.extras
+from datetime import datetime
+from flask import Flask, request, jsonify
+from google.auth import default
+
 
 app = Flask(__name__)
 
+SYNC_DB_URL = os.environ.get("DATABASE_URL")
+_sync_pool = None
+
 creds, _ = default()
 gc = gspread.authorize(creds)
+
+# ------------------------
+# Supabase y Nuevo Cron
+# ------------------------
+
+def get_sync_pool():
+    global _sync_pool
+    if _sync_pool is None:
+        _sync_pool = psycopg2.pool.SimpleConnectionPool(
+            minconn=1, maxconn=5, dsn=SYNC_DB_URL, connect_timeout=5
+        )
+    return _sync_pool
+
+def get_sync_conn():
+    return get_sync_pool().getconn()
+
+def release_sync_conn(conn):
+    get_sync_pool().putconn(conn)
+
+
+def tabla_vacia(tabla="ventas_items"):
+    conn = get_sync_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(f"SELECT EXISTS (SELECT 1 FROM {tabla} LIMIT 1)")
+            tiene_datos = cur.fetchone()[0]
+            return not tiene_datos
+    finally:
+        release_sync_conn(conn)
+
+
+def upsert_items(records: list, tabla="ventas_items", batch_size=500):
+    if not records:
+        return 0
+
+    columnas = list(records[0].keys())
+    cols_str = ", ".join(columnas)
+
+    update_cols = [c for c in columnas if c not in ("folio", "item_index")]
+    update_str = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
+
+    query = f"""
+        INSERT INTO {tabla} ({cols_str})
+        VALUES %s
+        ON CONFLICT (folio, item_index) DO UPDATE SET {update_str}
+    """
+
+    conn = get_sync_conn()
+    total = 0
+    try:
+        conn.autocommit = False
+        with conn.cursor() as cur:
+            for start in range(0, len(records), batch_size):
+                batch = records[start : start + batch_size]
+                valores = [tuple(r[c] for c in columnas) for r in batch]
+                psycopg2.extras.execute_values(cur, query, valores)
+                total += len(batch)
+                print(f"Upsert {start}–{start+len(batch)}: OK", file=sys.stderr)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        release_sync_conn(conn)
+
+    return total
+
+
+def normalizar_para_pg(df_items: pd.DataFrame) -> list:
+    records = []
+    for item_index, row in enumerate(df_items.itertuples(index=False), start=1):
+
+        def s(col):
+            v = getattr(row, col, None)
+            return None if v is None or (isinstance(v, float) and pd.isna(v)) else str(v).strip()
+
+        def n(col):
+            v = getattr(row, col, None)
+            if v is None: return None
+            x = pd.to_numeric(v, errors="coerce")
+            return None if pd.isna(x) else float(x)
+
+        def d(col):
+            v = getattr(row, col, None)
+            if v is None or (isinstance(v, float) and pd.isna(v)): return None
+            try:
+                dt = pd.to_datetime(v, errors="coerce")
+                return None if pd.isna(dt) else dt.strftime("%Y-%m-%d")
+            except:
+                return None
+
+        records.append({
+            "folio":            s("folio"),      # TEXT en tu tabla
+            "item_index":       item_index,      # coincide con UNIQUE (folio, item_index)
+            "fecha_captura":    d("fecha_captura"),
+            "fecha":            d("fecha"),
+            "departamento":     s("departamento"),
+            "cliente":          s("cliente"),
+            "metodo_de_venta":  s("metodo_de_venta"),
+            "num_sucursal":     n("num_sucursal"),
+            "sucursal":         s("sucursal"),
+            "vendedor":         s("vendedor"),
+            "cantidad":         n("cantidad"),
+            "categoria":        s("categoria"),
+            "descripcion":      s("descripcion"),
+            "precio_final":     n("precio_final"),
+            "tipo_de_pago":     s("tipo_de_pago"),
+            "salida":           s("salida"),
+            "synced_at":        datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        })
+    return records
+
 
 # ------------------------
 # LECTURA BASE
@@ -638,6 +759,77 @@ def run_maximos():
         return jsonify(status="error", error=str(ve)), 400
     except Exception as e:
         print(f"Error MAXIMOS: {str(e)}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
+        return jsonify(status="error", error=str(e)), 500
+    
+
+# ------------------------
+# ENDPOINT CRON
+# ------------------------
+@app.route("/sync-supabase", methods=["POST"])
+def sync_supabase():
+    """
+    Llamado por Google Cloud Scheduler.
+
+    Body JSON:
+    {
+      "spreadsheet_base_id": "...",
+      "sheet_base": "BaseV",    // opcional, default BaseV
+      "ventana_dias": 60        // opcional, default 60 — ignorado en primera sync
+    }
+    """
+    try:
+        data = request.get_json(force=True) or {}
+
+        spreadsheet_id = data.get("spreadsheet_base_id")
+        if not spreadsheet_id:
+            return jsonify(status="error", error="Falta spreadsheet_base_id"), 400
+
+        sheet_name   = data.get("sheet_base", "BaseV")
+        ventana_dias = int(data.get("ventana_dias", 60))
+        tabla        = data.get("tabla", "ventas_items")
+
+        # 1. Leer base completa del Drive
+        df = read_base(spreadsheet_id, sheet_name)
+        total_base = len(df)
+
+        # 2. Decidir modo: FULL (primera vez) o DELTA (ventana deslizante)
+        es_primera_sync = tabla_vacia(tabla)
+        modo = "full" if es_primera_sync else "delta"
+
+        if es_primera_sync:
+            df_sync = df
+            rango = f"0 – {df['num_a'].max():.0f}"
+            print(f"MODO FULL: {len(df_sync)} filas", file=sys.stderr)
+        else:
+            num_a_max = df["num_a"].max()
+            num_a_min = num_a_max - ventana_dias
+            df_sync = df[(df["num_a"] >= num_a_min) & (df["num_a"] <= num_a_max)]
+            rango = f"{num_a_min:.0f} – {num_a_max:.0f}"
+            print(f"MODO DELTA: {len(df_sync)} filas (ventana {rango})", file=sys.stderr)
+
+        # 3. Normalizar items
+        df_items = normalize_items(df_sync, items=9, include_extras=True)
+
+        # 4. Convertir a records para PostgreSQL
+        records = normalizar_para_pg(df_items)
+
+        # 5. Upsert
+        total_upserted = upsert_items(records, tabla=tabla)
+
+        return jsonify(
+            status="ok",
+            modo=modo,
+            filas_base_total=total_base,
+            filas_ventana=len(df_sync),
+            items_normalizados=len(records),
+            items_upserted=total_upserted,
+            rango=rango
+        )
+
+    except ValueError as ve:
+        return jsonify(status="error", error=str(ve)), 400
+    except Exception as e:
         print(traceback.format_exc(), file=sys.stderr)
         return jsonify(status="error", error=str(e)), 500
 
