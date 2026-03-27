@@ -4,3 +4,7 @@ pandas
 gspread
 google-auth
 psycopg2-binary
+mcp
+httpx
+supabase
+PyJWT
