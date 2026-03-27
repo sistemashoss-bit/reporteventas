@@ -234,7 +234,6 @@ MCP_TOOLS = {
 
 
 @bp.route("/mcp", methods=["POST"])
-@require_auth
 def mcp_endpoint():
     try:
         body = request.get_json()
@@ -329,7 +328,6 @@ def health():
 
 
 @bp.route("/mcp/query", methods=["POST"])
-@require_auth
 def query_ventas():
     try:
         body = request.get_json()
@@ -345,18 +343,15 @@ def query_ventas():
 
 
 @bp.route("/mcp/schema", methods=["GET"])
-@require_auth
 def get_schema():
     return jsonify(VENTAS_SCHEMA)
 
 
 @bp.route("/mcp/sucursales", methods=["GET"])
-@require_auth
 def get_sucursales_endpoint():
     return jsonify(get_sucursales())
 
 
 @bp.route("/mcp/periodo", methods=["GET"])
-@require_auth
 def get_periodo():
     return jsonify(get_available_period())
