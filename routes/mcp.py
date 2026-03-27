@@ -185,9 +185,9 @@ def get_available_period() -> dict:
         conn = get_sync_conn()
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT MIN(fechacaptura), MAX(fechacaptura) 
+                SELECT MIN(fecha_captura), MAX(fecha_captura) 
                 FROM ventas_items 
-                WHERE fechacaptura IS NOT NULL
+                WHERE fecha_captura IS NOT NULL
             """)
             result = cur.fetchone()
             return {
