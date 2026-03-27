@@ -326,3 +326,37 @@ def mcp_info():
 @bp.route("/health", methods=["GET"])
 def health():
     return jsonify({"status": "ok", "service": "mcp"})
+
+
+@bp.route("/mcp/query", methods=["POST"])
+@require_auth
+def query_ventas():
+    try:
+        body = request.get_json()
+        query = body.get("query", "") if body else ""
+        
+        if not query:
+            return jsonify({"error": "Falta query"}), 400
+        
+        result = execute_safe_query(query)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/mcp/schema", methods=["GET"])
+@require_auth
+def get_schema():
+    return jsonify(VENTAS_SCHEMA)
+
+
+@bp.route("/mcp/sucursales", methods=["GET"])
+@require_auth
+def get_sucursales_endpoint():
+    return jsonify(get_sucursales())
+
+
+@bp.route("/mcp/periodo", methods=["GET"])
+@require_auth
+def get_periodo():
+    return jsonify(get_available_period())
