@@ -12,8 +12,13 @@ def safe_get(row, *keys):
 
 def normalize_items(df, items=9, include_extras=False):
     out = []
+    tipos_excluidos = {"cancelado", "cancelada","Cancelada","Cancelado","CANCELADO","CANCELADA"}
 
     for _, r in df.iterrows():
+          # Filtrar cancelados antes de procesar items
+        tipo_pago = str(safe_get(r, "tipo_de_pago") or "").strip().lower()
+        if tipo_pago in tipos_excluidos:
+            continue
         for i in range(1, items + 1):
             if i <= 3:
                 cant = safe_get(r, f"cant_{i}", f"cant{i}")
@@ -88,51 +93,49 @@ def normalize_items(df, items=9, include_extras=False):
 
 def normalizar_para_pg(df_items: pd.DataFrame) -> list:
     records = []
-    for item_index, row in enumerate(df_items.itertuples(index=False), start=1):
+    folio_counter = {}  # contador por folio
+
+    for row in df_items.itertuples(index=False):
 
         def s(col):
             v = getattr(row, col, None)
-            return (
-                None
-                if v is None or (isinstance(v, float) and pd.isna(v))
-                else str(v).strip()
-            )
+            return None if v is None or (isinstance(v, float) and pd.isna(v)) else str(v).strip()
 
         def n(col):
             v = getattr(row, col, None)
-            if v is None:
-                return None
+            if v is None: return None
             x = pd.to_numeric(v, errors="coerce")
             return None if pd.isna(x) else float(x)
 
         def d(col):
             v = getattr(row, col, None)
-            if v is None or (isinstance(v, float) and pd.isna(v)):
-                return None
-            dt = pd.to_datetime(v, errors="coerce")
+            if v is None or (isinstance(v, float) and pd.isna(v)): return None
+            dt = pd.to_datetime(v, dayfirst=True, errors="coerce")
             return None if pd.isna(dt) else dt.strftime("%Y-%m-%d")
 
-        records.append(
-            {
-                "folio": s("folio"),
-                "item_index": item_index,
-                "fecha_captura": d("fecha_captura"),
-                "fecha": d("fecha"),
-                "departamento": s("departamento"),
-                "cliente": s("cliente"),
-                "metodo_de_venta": s("metodo_de_venta"),
-                "num_sucursal": n("num_sucursal"),
-                "sucursal": s("sucursal"),
-                "vendedor": s("vendedor"),
-                "cantidad": n("cantidad"),
-                "categoria": s("categoria"),
-                "descripcion": s("descripcion"),
-                "precio_final": n("precio_final"),
-                "tipo_de_pago": s("tipo_de_pago"),
-                "salida": s("salida"),
-                "synced_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-            }
-        )
+        folio = s("folio")
+        folio_counter[folio] = folio_counter.get(folio, 0) + 1
+        item_index = folio_counter[folio]
+
+        records.append({
+            "folio":           folio,
+            "item_index":      item_index,  # contador por folio, estable entre syncs
+            "fecha_captura":   d("fecha_captura"),
+            "fecha":           d("fecha"),
+            "departamento":    s("departamento"),
+            "cliente":         s("cliente"),
+            "metodo_de_venta": s("metodo_de_venta"),
+            "num_sucursal":    n("num_sucursal"),
+            "sucursal":        s("sucursal"),
+            "vendedor":        s("vendedor"),
+            "cantidad":        n("cantidad"),
+            "categoria":       s("categoria"),
+            "descripcion":     s("descripcion"),
+            "precio_final":    n("precio_final"),
+            "tipo_de_pago":    s("tipo_de_pago"),
+            "salida":          s("salida"),
+            "synced_at":       datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        })
     return records
 
 
