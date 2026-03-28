@@ -1,6 +1,7 @@
 import os
 import re
 import json
+from decimal import Decimal
 from functools import wraps
 
 import httpx
@@ -119,6 +120,11 @@ def validate_query(query: str) -> tuple[bool, str]:
     return True, ""
 
 
+def convert_value(val):
+    if isinstance(val, Decimal):
+        return float(val)
+    return val
+
 def execute_safe_query(query: str) -> dict:
     valid, error = validate_query(query)
     if not valid:
@@ -129,7 +135,7 @@ def execute_safe_query(query: str) -> dict:
         conn = get_sync_conn()
         with conn.cursor() as cur:
             cur.execute(f"SELECT COUNT(*) FROM ({query}) as subquery")
-            total_count = cur.fetchone()[0]
+            total_count = int(cur.fetchone()[0])
             
             if total_count > MAX_ROWS:
                 return {
@@ -145,7 +151,7 @@ def execute_safe_query(query: str) -> dict:
             columns = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
             
-            results = [dict(zip(columns, row)) for row in rows]
+            results = [{k: convert_value(v) for k, v in dict(zip(columns, row)).items()} for row in rows]
             
             return {
                 "success": True,
@@ -173,7 +179,7 @@ def get_sucursales() -> list:
                 WHERE num_sucursal IS NOT NULL
                 ORDER BY num_sucursal
             """)
-            return [{"num_sucursal": r[0], "sucursal": r[1]} for r in cur.fetchall()]
+            return [{"num_sucursal": int(r[0]) if r[0] else None, "sucursal": r[1]} for r in cur.fetchall()]
     finally:
         if conn:
             release_sync_conn(conn)
