@@ -12,7 +12,7 @@ def safe_get(row, *keys):
 
 def normalize_items(df, items=9, include_extras=False):
     out = []
-    tipos_excluidos = {"cancelado", "cancelada","Cancelada","Cancelado","CANCELADO","CANCELADA"}
+    tipos_excluidos = {"cancelado", "cancelada","Cancelada","Cancelado","CANCELADO","CANCELADA","Instalación","instalación","INSTALACIÓN"}
 
     for _, r in df.iterrows():
           # Filtrar cancelados antes de procesar items
