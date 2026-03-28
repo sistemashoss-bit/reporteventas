@@ -1,21 +1,25 @@
 import os
 import sys
+import threading
 
 import psycopg2.extras
 import psycopg2.pool
 
 SYNC_DB_URL = os.environ.get("DATABASE_URL")
 _sync_pool = None
+_pool_lock = threading.Lock()
 
 
 def get_sync_pool():
     global _sync_pool
     if _sync_pool is None:
-        if not SYNC_DB_URL:
-            raise RuntimeError("Falta env var DATABASE_URL")
-        _sync_pool = psycopg2.pool.SimpleConnectionPool(
-            minconn=1, maxconn=5, dsn=SYNC_DB_URL, connect_timeout=5
-        )
+        with _pool_lock:
+            if _sync_pool is None:
+                if not SYNC_DB_URL:
+                    raise RuntimeError("Falta env var DATABASE_URL")
+                _sync_pool = psycopg2.pool.ThreadedConnectionPool(
+                    minconn=1, maxconn=10, dsn=SYNC_DB_URL, connect_timeout=5
+                )
     return _sync_pool
 
 
@@ -24,7 +28,8 @@ def get_sync_conn():
 
 
 def release_sync_conn(conn):
-    get_sync_pool().putconn(conn)
+    if conn:
+        get_sync_pool().putconn(conn)
 
 
 def tabla_vacia(tabla="ventas_items"):
