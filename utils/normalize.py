@@ -85,6 +85,7 @@ def normalize_items(df, items=9, include_extras=False):
 
     return pd.DataFrame(out)
 
+
 def normalize_items_sync(df, items=9, include_extras=False):
     out = []
     tipos_excluidos = {
@@ -119,7 +120,7 @@ def normalize_items_sync(df, items=9, include_extras=False):
                 "fecha_captura":   safe_get(r, "fecha_captura"),
                 "fecha":           safe_get(r, "fecha"),
                 "folio":           safe_get(r, "folio"),
-                "num_columna":     i,            # <-- clave: columna real, no índice global
+                "num_columna":     i,
                 "departamento":    safe_get(r, "departamento"),
                 "cliente":         safe_get(r, "cliente"),
                 "metodo_de_venta": safe_get(r, "metodo_de_venta"),
@@ -169,7 +170,7 @@ def normalize_items_sync(df, items=9, include_extras=False):
 
 
 def normalizar_para_pg(df_items: pd.DataFrame) -> list:
-    seen = {}  # dedup por (folio, item_index) — última ocurrencia gana
+    seen = {}  # dedup por (folio, item_index, num_sucursal) — última ocurrencia gana
 
     for row in df_items.itertuples(index=False):
 
@@ -186,12 +187,12 @@ def normalizar_para_pg(df_items: pd.DataFrame) -> list:
         def d(col):
             v = getattr(row, col, None)
             if v is None or (isinstance(v, float) and pd.isna(v)): return None
-            dt = pd.to_datetime(v, dayfirst=True, errors="coerce")  # <-- agregar dayfirst=True
+            dt = pd.to_datetime(v, dayfirst=True, errors="coerce")
             return None if pd.isna(dt) else dt.strftime("%Y-%m-%d")
 
         record = {
             "folio":           s("folio"),
-            "item_index":      int(row.num_columna),  # columna real 1-9
+            "item_index":      int(row.num_columna),
             "fecha_captura":   d("fecha_captura"),
             "fecha":           d("fecha"),
             "departamento":    s("departamento"),
@@ -209,12 +210,11 @@ def normalizar_para_pg(df_items: pd.DataFrame) -> list:
             "synced_at":       datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
-        # campos opcionales de include_extras
         for extra in ("comentario_cupon", "monto_cupon", "comentario"):
             if hasattr(row, extra):
                 record[extra] = s(extra) if extra != "monto_cupon" else n(extra)
 
-        key = (record["folio"], record["item_index"])
+        key = (record["folio"], record["item_index"], record["num_sucursal"])
         seen[key] = record
 
     return list(seen.values())
