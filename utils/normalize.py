@@ -93,7 +93,6 @@ def normalize_items(df, items=9, include_extras=False):
 
 def normalizar_para_pg(df_items: pd.DataFrame) -> list:
     records = []
-    folio_counter = {}  # contador por folio
 
     for row in df_items.itertuples(index=False):
 
@@ -113,13 +112,8 @@ def normalizar_para_pg(df_items: pd.DataFrame) -> list:
             dt = pd.to_datetime(v, dayfirst=True, errors="coerce")
             return None if pd.isna(dt) else dt.strftime("%Y-%m-%d")
 
-        folio = s("folio")
-        folio_counter[folio] = folio_counter.get(folio, 0) + 1
-        item_index = folio_counter[folio]
-
         records.append({
-            "folio":           folio,
-            "item_index":      item_index,  # contador por folio, estable entre syncs
+            "folio":           s("folio"),
             "fecha_captura":   d("fecha_captura"),
             "fecha":           d("fecha"),
             "departamento":    s("departamento"),
@@ -137,7 +131,6 @@ def normalizar_para_pg(df_items: pd.DataFrame) -> list:
             "synced_at":       datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
         })
     return records
-
 
 def filtrar_por_fecha(df, ini, fin):
     return df[(df["num_a"] >= ini) & (df["num_a"] <= fin)]

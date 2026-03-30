@@ -50,13 +50,13 @@ def upsert_items(records: list, tabla="ventas_items", batch_size=500):
     columnas = list(records[0].keys())
     cols_str = ", ".join(columnas)
 
-    update_cols = [c for c in columnas if c not in ("folio", "item_index")]
+    update_cols = [c for c in columnas if c not in ("folio", "descripcion")]
     update_str = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
 
     query = f"""
         INSERT INTO {tabla} ({cols_str})
         VALUES %s
-        ON CONFLICT (folio, item_index) DO UPDATE SET {update_str}
+        ON CONFLICT (folio, descripcion) DO UPDATE SET {update_str}
     """
 
     conn = get_sync_conn()
