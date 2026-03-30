@@ -56,7 +56,7 @@ def upsert_items(records: list, tabla="ventas_items", batch_size=500):
     query = f"""
         INSERT INTO {tabla} ({cols_str})
         VALUES %s
-        ON CONFLICT (folio, descripcion) DO UPDATE SET {update_str}
+        ON CONFLICT (folio, item_index) DO UPDATE SET {update_str}
     """
 
     conn = get_sync_conn()
