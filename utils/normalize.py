@@ -186,7 +186,7 @@ def normalizar_para_pg(df_items: pd.DataFrame) -> list:
         def d(col):
             v = getattr(row, col, None)
             if v is None or (isinstance(v, float) and pd.isna(v)): return None
-            dt = pd.to_datetime(v, errors="coerce")
+            dt = pd.to_datetime(v, dayfirst=True, errors="coerce")  # <-- agregar dayfirst=True
             return None if pd.isna(dt) else dt.strftime("%Y-%m-%d")
 
         record = {

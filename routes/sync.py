@@ -40,7 +40,7 @@ def sync_supabase():
             rango = f"{num_a_min:.0f} – {num_a_max:.0f}"
             print(f"MODO DELTA: {len(df_sync)} filas (ventana {rango})", file=sys.stderr)
 
-        df_items = normalize_items_sync(df_sync, items=9, include_extras=True)
+        df_items = normalize_items_sync(df_sync, items=9, include_extras=False)
         records = normalizar_para_pg(df_items)
         total_upserted = upsert_items(records, tabla=tabla)
 
