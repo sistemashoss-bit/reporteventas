@@ -238,6 +238,7 @@ def predict_ventas_puertas(sucursal: Optional[str], meses: int = 3) -> dict:
         
         df = pd.DataFrame(rows, columns=["mes", "descripcion", "cantidad"])
         df["mes"] = pd.to_datetime(df["mes"])
+        df["cantidad"] = df["cantidad"].astype(float)
         
         resultados = {}
         
@@ -255,7 +256,7 @@ def predict_ventas_puertas(sucursal: Optional[str], meses: int = 3) -> dict:
             if len(mensual) < 3:
                 continue
             
-            valores = mensual.values
+            valores = np.array([float(v) for v in mensual.values])
             n = len(valores)
             
             mejor_metodo = None
