@@ -50,7 +50,7 @@ def upsert_items(records: list, tabla="ventas_items", batch_size=500):
     columnas = list(records[0].keys())
     cols_str = ", ".join(columnas)
 
-    update_cols = [c for c in columnas if c not in ("folio", "descripcion")]
+    update_cols = [c for c in columnas if c not in ("folio", "item_index")]  # fix
     update_str = ", ".join(f"{c} = EXCLUDED.{c}" for c in update_cols)
 
     query = f"""
