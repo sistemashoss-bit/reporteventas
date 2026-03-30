@@ -253,6 +253,8 @@ def predict_ventas_puertas(sucursal: Optional[str], meses: int = 3) -> dict:
             mensual = puerta_df["cantidad"].resample("ME").sum().fillna(0)
             mensual = mensual[mensual > 0]
             
+            ultimo_mes = mensual.index[-1]
+            
             if len(mensual) < 3:
                 continue
             
@@ -297,10 +299,16 @@ def predict_ventas_puertas(sucursal: Optional[str], meses: int = 3) -> dict:
                     mejor_metodo = "estacional"
                     predicciones = pred_est
             
-            ultimo_mes = mensual.index[-1]
+            from datetime import datetime
+            hoy = datetime.now()
+            if hoy.month == 12:
+                mes_actual = pd.Timestamp(year=hoy.year + 1, month=1, day=1)
+            else:
+                mes_actual = pd.Timestamp(year=hoy.year, month=hoy.month + 1, day=1)
+            
             preds = []
             for i in range(meses):
-                mes_pred = ultimo_mes + pd.DateOffset(months=i + 1)
+                mes_pred = mes_actual + pd.DateOffset(months=i)
                 preds.append({
                     "mes": mes_pred.strftime("%Y-%m"),
                     "cantidad": int(round(predicciones[i])),
