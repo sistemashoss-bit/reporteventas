@@ -3,8 +3,11 @@ import re
 import json
 from decimal import Decimal
 from functools import wraps
+from typing import Optional
 
 import httpx
+import pandas as pd
+import numpy as np
 from flask import Blueprint, jsonify, request, Response
 
 from utils.db import get_sync_conn, release_sync_conn
@@ -205,6 +208,127 @@ def get_available_period() -> dict:
             release_sync_conn(conn)
 
 
+def predict_ventas_puertas(sucursal: Optional[str], meses: int = 3) -> dict:
+    conn = None
+    try:
+        conn = get_sync_conn()
+        
+        where_clause = "WHERE descripcion ILIKE 'H-%'"
+        if sucursal:
+            where_clause += f" AND sucursal ILIKE '%{sucursal}%'"
+        
+        query = f"""
+            SELECT 
+                DATE_TRUNC('month', fecha)::date as mes,
+                descripcion,
+                SUM(cantidad) as cantidad
+            FROM ventas_items
+            {where_clause}
+            AND fecha IS NOT NULL
+            GROUP BY DATE_TRUNC('month', fecha)::date, descripcion
+            ORDER BY mes, descripcion
+        """
+        
+        with conn.cursor() as cur:
+            cur.execute(query)
+            rows = cur.fetchall()
+        
+        if not rows:
+            return {"success": False, "error": "Sin datos históricos para puertas"}
+        
+        df = pd.DataFrame(rows, columns=["mes", "descripcion", "cantidad"])
+        df["mes"] = pd.to_datetime(df["mes"])
+        
+        resultados = {}
+        
+        for puerta in df["descripcion"].unique():
+            puerta_df = df[df["descripcion"] == puerta].copy()
+            puerta_df = puerta_df.sort_values("mes")
+            
+            if len(puerta_df) < 3:
+                continue
+            
+            puerta_df = puerta_df.set_index("mes")
+            mensual = puerta_df["cantidad"].resample("ME").sum().fillna(0)
+            mensual = mensual[mensual > 0]
+            
+            if len(mensual) < 3:
+                continue
+            
+            valores = mensual.values
+            n = len(valores)
+            
+            mejor_metodo = None
+            mejor_error = float("inf")
+            predicciones = []
+            
+            # 1. Regresión lineal
+            x = np.arange(len(valores))
+            coef = np.polyfit(x, valores, 1)
+            pred_lr = [coef[0] * (n + i) + coef[1] for i in range(1, meses + 1)]
+            error_lr = np.mean(np.abs(valores[-3:])) if n >= 3 else np.mean(valores)
+            
+            if error_lr < mejor_error:
+                mejor_error = error_lr
+                mejor_metodo = "regresion_lineal"
+                predicciones = pred_lr
+            
+            # 2. Media móvil (últimos 3 meses)
+            if n >= 3:
+                media_movil = np.mean(valores[-3:])
+                pred_ma = [media_movil] * meses
+                error_ma = np.mean(np.abs(valores[-3:] - media_movil))
+                
+                if error_ma < mejor_error:
+                    mejor_error = error_ma
+                    mejor_metodo = "media_movil"
+                    predicciones = pred_ma
+            
+            # 3. Estacional simple (mismo mes del año anterior)
+            if n >= 12:
+                ultimos_12 = valores[-12:]
+                estacional = ultimos_12[-meses:] if len(ultimos_12) >= meses else ultimos_12
+                pred_est = list(estacional) + [np.mean(ultimos_12)] * (meses - len(estacional)) if len(ultimos_12) < meses else estacional
+                error_est = np.mean(np.abs(valores[-3:] - np.mean(valores[-3:])))
+                
+                if error_est < mejor_error:
+                    mejor_error = error_est
+                    mejor_metodo = "estacional"
+                    predicciones = pred_est
+            
+            ultimo_mes = mensual.index[-1]
+            preds = []
+            for i in range(meses):
+                mes_pred = ultimo_mes + pd.DateOffset(months=i + 1)
+                preds.append({
+                    "mes": mes_pred.strftime("%Y-%m"),
+                    "cantidad": int(round(predicciones[i])),
+                    "metodo": mejor_metodo
+                })
+            
+            resultados[puerta] = {
+                "historial": [{"mes": m.strftime("%Y-%m"), "cantidad": int(c)} for m, c in mensual.items()],
+                "predicciones": preds,
+                "metodo_usado": mejor_metodo
+            }
+        
+        if not resultados:
+            return {"success": False, "error": "No hay suficientes datos para predecir"}
+        
+        return {
+            "success": True,
+            "sucursal": sucursal or "total",
+            "meses_predecidos": meses,
+            "predicciones_por_puerta": resultados
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+    finally:
+        if conn:
+            release_sync_conn(conn)
+
+
 MCP_TOOLS = {
     "query_ventas": {
         "description": """Ejecuta consultas SQL SELECT en la tabla de ventas.
@@ -235,6 +359,24 @@ MCP_TOOLS = {
     "get_available_period": {
         "description": "Retorna el rango de fechas con datos disponibles.",
         "inputSchema": {"type": "object", "properties": {}}
+    },
+    "predict_puertas": {
+        "description": """Predice ventas de puertas (códigos H-%) para N meses.
+        Analiza automáticamente el mejor método (regresión lineal, media móvil o estacional).
+        Returns: desglose por puerta/modelo con historial y predicciones.""",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "sucursal": {
+                    "type": "string",
+                    "description": "Nombre de sucursal (ej: Altamisa). Omitir para total."
+                },
+                "meses": {
+                    "type": "integer",
+                    "description": "Cantidad de meses a predecir (default: 3)"
+                }
+            }
+        }
     },
 }
 
@@ -304,6 +446,19 @@ def mcp_endpoint():
                         "content": [{
                             "type": "text",
                             "text": json.dumps(period, ensure_ascii=False)
+                        }]
+                    }
+                })
+            
+            elif tool_name == "predict_puertas":
+                sucursal = arguments.get("sucursal")
+                meses = arguments.get("meses", 3)
+                result = predict_ventas_puertas(sucursal, meses)
+                return jsonify({
+                    "result": {
+                        "content": [{
+                            "type": "text",
+                            "text": json.dumps(result, ensure_ascii=False, default=str)
                         }]
                     }
                 })
