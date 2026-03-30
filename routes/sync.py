@@ -4,7 +4,7 @@ import traceback
 from flask import Blueprint, jsonify, request
 
 from utils.db import tabla_vacia, upsert_items
-from utils.normalize import normalizar_para_pg, normalize_items
+from utils.normalize import normalizar_para_pg, normalize_items_sync
 from utils.sheets import read_base
 
 bp = Blueprint("sync", __name__)
@@ -40,7 +40,7 @@ def sync_supabase():
             rango = f"{num_a_min:.0f} – {num_a_max:.0f}"
             print(f"MODO DELTA: {len(df_sync)} filas (ventana {rango})", file=sys.stderr)
 
-        df_items = normalize_items(df_sync, items=9, include_extras=True)
+        df_items = normalize_items_sync(df_sync, items=9, include_extras=True)
         records = normalizar_para_pg(df_items)
         total_upserted = upsert_items(records, tabla=tabla)
 
