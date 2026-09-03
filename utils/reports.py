@@ -19,12 +19,14 @@ def reporte_general(df):
 
 
 def reporte_constructora(df):
-    filtered = df[df["departamento"] == "constructora"]
+    filtered = df[(df["departamento"] == "constructora")
+            & (df["tipo_de_pago"].isin(["pago total", "puerta pagada (anticipo)", "complemento"]))]
     return normalize_items(filtered)
 
 
 def reporte_distribuidores(df):
-    filtered = df[(df["departamento"] == "distribuidores") & (df["tipo_de_pago"] == "pago")]
+    filtered = df[(df["departamento"] == "distribuidores")
+            & (df["tipo_de_pago"].isin(["pago total", "puerta pagada (anticipo)", "complemento"]))]
     return normalize_items(filtered)
 
 
