@@ -10,7 +10,7 @@ def reporte_general(df):
             (df["departamento"] == "sucursal")
             & (
                 df["tipo_de_pago"].isin(
-                    ["pago total", "puerta pagada (anticipo)", "complemento"]
+                    ["pago", "pago total", "puerta pagada (anticipo)", "complemento"]
                 )
             )
         )
@@ -20,20 +20,20 @@ def reporte_general(df):
 
 def reporte_constructora(df):
     filtered = df[(df["departamento"] == "constructora")
-            & (df["tipo_de_pago"].isin(["pago total", "puerta pagada (anticipo)", "complemento"]))]
+            & (df["tipo_de_pago"].isin(["pago","pago total", "puerta pagada (anticipo)", "complemento"]))]
     return normalize_items(filtered)
 
 
 def reporte_distribuidores(df):
     filtered = df[(df["departamento"] == "distribuidores")
-            & (df["tipo_de_pago"].isin(["pago total", "puerta pagada (anticipo)", "complemento"]))]
+            & (df["tipo_de_pago"].isin(["pago", "pago total", "puerta pagada (anticipo)", "complemento"]))]
     return normalize_items(filtered)
 
 
 def reporte_sucursales(df):
     filtered = df[
         (df["departamento"] == "sucursal")
-        & (df["tipo_de_pago"].isin(["pago total", "puerta pagada (anticipo)", "complemento"]))
+        & (df["tipo_de_pago"].isin(["pago", "pago total", "puerta pagada (anticipo)", "complemento"]))
     ]
     return normalize_items(filtered, items=6, include_extras=True)
 
