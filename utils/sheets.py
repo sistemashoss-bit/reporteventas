@@ -128,7 +128,9 @@ def write_to_sheet_legacy_style(df, spreadsheet_id, sheet_name, start_row=26):
                 if pd.isna(val) or str(val).strip() == "":
                     return ""
                 try:
-                    dt = pd.to_datetime(val, errors="coerce")
+                    dt = pd.to_datetime(val, format="%d/%m/%Y", errors="coerce")
+                    if pd.isna(dt):
+                        dt = pd.to_datetime(val, errors="coerce")
                     if pd.notna(dt):
                         return dt.strftime("%Y-%m-%d")
                 except Exception:
