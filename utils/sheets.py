@@ -52,7 +52,26 @@ def read_base(spreadsheet_id, sheet_name):
 
         print(f"Columnas encontradas: {df.columns.tolist()[:20]}...", file=sys.stderr)
 
+        num_a_raw = df["num_a"].copy()
         df["num_a"] = pd.to_numeric(df["num_a"], errors="coerce")
+
+        malas = df["num_a"].isna()
+        if malas.any():
+            muestra = pd.DataFrame(
+                {
+                    "fila_hoja": df.index[malas] + 2,
+                    "num_a_raw": num_a_raw[malas].map(repr),
+                    "fecha_captura": df.loc[malas, "fecha_captura"] if "fecha_captura" in df.columns else None,
+                    "fecha": df.loc[malas, "fecha"] if "fecha" in df.columns else None,
+                }
+            )
+            print(
+                f"DEBUG num_a no numerico: {malas.sum()} filas, "
+                f"valores={num_a_raw[malas].map(repr).value_counts().head(10).to_dict()}",
+                file=sys.stderr,
+            )
+            print(f"DEBUG num_a no numerico primeras:\n{muestra.head(10).to_string()}", file=sys.stderr)
+            print(f"DEBUG num_a no numerico ultimas:\n{muestra.tail(10).to_string()}", file=sys.stderr)
 
         if "departamento" in df.columns:
             df["departamento"] = df["departamento"].astype(str).str.strip().str.lower()
