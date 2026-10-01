@@ -34,38 +34,7 @@ def run_multi():
         tipo = data["tipo"]
 
         df_fechas = filtrar_por_fecha(df, ini, fin)
-
-        print(
-            f"DEBUG base: filas={len(df)} num_a_min={df['num_a'].min()} "
-            f"num_a_max={df['num_a'].max()} num_a_nan={df['num_a'].isna().sum()}",
-            file=sys.stderr,
-        )
-        print(
-            f"DEBUG rango {ini}-{fin}: filas={len(df_fechas)} "
-            f"num_a_max={df_fechas['num_a'].max()}",
-            file=sys.stderr,
-        )
-        print(
-            f"DEBUG filas por num_a en rango: {df_fechas['num_a'].value_counts().sort_index().to_dict()}",
-            file=sys.stderr,
-        )
-        df_tarde = df_fechas[df_fechas["num_a"] > 46288]
-        print(
-            f"DEBUG despues 23/09 departamento: {df_tarde['departamento'].value_counts().to_dict()}",
-            file=sys.stderr,
-        )
-        print(
-            f"DEBUG despues 23/09 tipo_de_pago: {df_tarde['tipo_de_pago'].value_counts().to_dict()}",
-            file=sys.stderr,
-        )
-
         out = run_reporte(tipo, df_fechas)
-
-        if "fecha" in out.columns:
-            print(
-                f"DEBUG salida: filas={len(out)} fechas={out['fecha'].astype(str).value_counts().to_dict()}",
-                file=sys.stderr,
-            )
 
         write_to_sheet_legacy_style(
             out,

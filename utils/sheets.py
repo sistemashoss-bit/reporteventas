@@ -16,6 +16,15 @@ def get_gspread_client():
     return _gc
 
 
+def fecha_a_serial(serie):
+    texto = serie.astype(str).str.strip()
+    dt = pd.to_datetime(texto, format="%d/%m/%Y", errors="coerce")
+    faltan = dt.isna() & (texto != "")
+    if faltan.any():
+        dt[faltan] = pd.to_datetime(texto[faltan], format="%d/%m/%Y %H:%M:%S", errors="coerce")
+    return (dt.dt.normalize() - pd.Timestamp("1899-12-30")).dt.days.astype("float")
+
+
 def read_base(spreadsheet_id, sheet_name):
     try:
         gc = get_gspread_client()
@@ -52,26 +61,11 @@ def read_base(spreadsheet_id, sheet_name):
 
         print(f"Columnas encontradas: {df.columns.tolist()[:20]}...", file=sys.stderr)
 
-        num_a_raw = df["num_a"].copy()
-        df["num_a"] = pd.to_numeric(df["num_a"], errors="coerce")
+        df["num_a"] = fecha_a_serial(df["fecha_captura"])
 
-        malas = df["num_a"].isna()
-        if malas.any():
-            muestra = pd.DataFrame(
-                {
-                    "fila_hoja": df.index[malas] + 2,
-                    "num_a_raw": num_a_raw[malas].map(repr),
-                    "fecha_captura": df.loc[malas, "fecha_captura"] if "fecha_captura" in df.columns else None,
-                    "fecha": df.loc[malas, "fecha"] if "fecha" in df.columns else None,
-                }
-            )
-            print(
-                f"DEBUG num_a no numerico: {malas.sum()} filas, "
-                f"valores={num_a_raw[malas].map(repr).value_counts().head(10).to_dict()}",
-                file=sys.stderr,
-            )
-            print(f"DEBUG num_a no numerico primeras:\n{muestra.head(10).to_string()}", file=sys.stderr)
-            print(f"DEBUG num_a no numerico ultimas:\n{muestra.tail(10).to_string()}", file=sys.stderr)
+        sin_fecha = df["num_a"].isna().sum()
+        if sin_fecha:
+            print(f"Filas sin fecha_captura válida (se excluyen): {sin_fecha}", file=sys.stderr)
 
         if "departamento" in df.columns:
             df["departamento"] = df["departamento"].astype(str).str.strip().str.lower()
